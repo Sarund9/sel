@@ -14,34 +14,62 @@ import "core:unicode/utf8"
 import tb "tui/termbox2"
 import "tui"
 
-import "core:container/rbtree"
-import "core:text/scanner"
-
 
 Editor :: struct {
     gap: GapBuffer,
     cursor: int,
-    lines: [dynamic]int, // where does each line start
+    lines: [dynamic]Line_Range, // where does each line start
+}
+
+Line_Range :: struct {
+    offset, size: int,
 }
 
 // O(n)
 calculate_lines :: proc(ed: ^Editor) {
 
     clear(&ed.lines)
-    left, right := gbuff_strings(ed.gap)
-    append(&ed.lines, 0) // Start of file
 
     // TODO: File Chunks
     // TODO: Only invalidate after cursor
     // TODO: Handle wrapping screen width
+
+    left, right := gbuff_strings(ed.gap)
+    start: int
+    state := false
     for c, i in left {
-        if c == '\n' {
-            append(&ed.lines, i + 1)
+        switch c {
+        case '\n', '\r':
+            if state {
+                state = false
+                start = i + 1 // Starting on the next line.
+                break
+            }
+            append(&ed.lines, Line_Range { start, i - start })
+            state = true
+        case:
+            if !state do break
+            state = false
+            start = i
         }
     }
+
+    start = len(left)
+    state = false
     for c, i in right {
-        if c == '\n' {
-            append(&ed.lines, len(left) + i + 1)
+        switch c {
+        case '\n', '\r':
+            if state {
+                state = false
+                start = len(left) + i + 1 // Starting on the next line.
+                break
+            }
+            append(&ed.lines, Line_Range { start, (len(left) + i) - start })
+            state = true
+        case:
+            if !state do break
+            state = false
+            start = i
         }
     }
 }
@@ -49,17 +77,28 @@ calculate_lines :: proc(ed: ^Editor) {
 line_length :: proc(e: ^Editor, line_index: int, loc := #caller_location) -> int {
     assert(line_index >= 0 && line_index < len(e.lines), "Invalid Line Index", loc)
 
-    if line_index >= len(e.lines) - 1 {
-        buflen := gbuff_len(e.gap)
-        return buflen - e.lines[len(e.lines) - 1 ]
-    } else {
-        starts := e.lines[line_index]
-        next := e.lines[line_index + 1]
-        return next - starts
-    }
+    return e.lines[line_index].size
+
+    // if line_index >= len(e.lines) - 1 {
+    //     // If it's the last line..
+    //     buflen := gbuff_len(e.gap)
+    //     line := e.lines[len(e.lines) - 1 ]
+    //     return line.size
+    // } else {
+    //     starts := e.lines[line_index]
+    //     next := e.lines[line_index + 1]
+    //     return next - starts // - 2 // NEW LINES, 
+    //     // TODO: HANDLE THIS BETTER
+    // }
 }
 
-edit_insert :: proc(e: ^Editor, cursor: int, text: string) {
+edit_insert_rune :: proc(e: ^Editor, cursor: int, char: rune) {
+    gbuff_insert_rune(&e.gap, cursor, char)
+    e.cursor += utf8.rune_size(char)
+    calculate_lines(e)
+}
+
+edit_insert_string :: proc(e: ^Editor, cursor: int, text: string) {
     gbuff_insert_string(&e.gap, cursor, text)
     e.cursor += len(text)
     calculate_lines(e)
@@ -77,8 +116,62 @@ edit_remove :: proc(e: ^Editor, cursor, count: int) {
     calculate_lines(e)
 }
 
+// edit_setcursor :: proc(e: ^Editor, line, char: int, loc := #caller_location) {
+//     assert(line >= 0 && line < len(e.lines), "Line Index out of range", loc)
+//     linestart := e.lines[line]
+//     e.cursor = linestart + char
+//     if e.gap.start < e.cursor && e.gap.start > linestart {
+        
+//         // Before start
+//         // before_start := max(e.gap.start - linestart, 0)
+//         // After end
+//         // after_end := max((linestart + char) - e.gap.end, 0)
+//         gap_size := (e.gap.start - e.gap.end)
+//         // if end is less than linestart+char
+//         // then reduce that difference
+//         diff := max((linestart + char) - e.gap.end, 0)
+
+//         gap_overlap := gap_size - diff
+
+//         e.cursor = linestart + char + gap_overlap
+
+//         // e.cursor += max(e.gap.start - linestart, 0)
+//         // e.cursor += max((linestart + char) - e.gap.end, 0)
+//     }
+// }
+
+edit_cursor_move :: proc(e: ^Editor, delta: int, loc := #caller_location) {
+    size := gbuff_len(e.gap)
+    newPos := e.cursor + size
+    newPos = clamp(newPos, 0, size - 1)
+
+    if delta < 0 {
+        // Moved backwards inside the gap
+        if newPos < e.gap.end {
+            // If the gap is at the beginning
+            if e.gap.start == 0 {
+                newPos = 0
+            } else {
+                newPos = e.gap.start + (delta + (e.cursor - e.gap.end))
+            }
+        }
+    } else {
+        // Moved forwards inside the gap
+        // TODO: Finish
+        panic("Not Implemented", loc)
+        // if newPos >= e.gap.start {
+        //     if e.gap.end == 0 {
+        //         newPos = e.gap.start
+        //     } else {
+        //         newPos += (e.gap.start - newPos)
+        //     }
+        // }
+    }
+    e.cursor = newPos
+}
+
 // TODO: UTF8 SUPPORT
-rune_at :: proc(e: ^Editor) -> rune {
+rune_at_cursor :: proc(e: ^Editor) -> rune {
     cursor := clamp(e.cursor, 0, gbuff_len(e.gap) - 1)
     left, right := gbuff_strings(e.gap)
     if cursor < len(left) {
@@ -88,24 +181,52 @@ rune_at :: proc(e: ^Editor) -> rune {
     }
 }
 
+rune_at_index :: proc(e: ^Editor, charIndex: int) -> rune {
+    charIndex := clamp(charIndex, 0, gbuff_len(e.gap) - 1)
+    left, right := gbuff_strings(e.gap)
+    if charIndex < len(left) {
+        return rune(left[charIndex])
+    } else {
+        return rune(right[charIndex])
+    }
+}
+
 print_range :: proc(
     e: ^Editor,
     build: ^str.Builder,
     start, end: int,
+    loc := #caller_location,
 ) {
+    size := gbuff_len(e.gap)
     left, right := gbuff_strings(e.gap)
-    assert(start >= 0)
-    assert(end <= gbuff_len(e.gap))
+    assert(start >= 0, "Start index cannot be negative", loc)
+    assert(start < end, "End index must be greater than start", loc)
+    assert(end <= size, "End index is out of range", loc)
 
     leftl := len(left)
-    if end < leftl {
+    if end <= leftl {
         str.write_string(build, left[start:end])
     } else if start >= leftl {
-        str.write_string(build, right[start:end])
+        // if _debug {
+        //     log.warn("PRECRASH:", start, end, "-", len(right))
+            
+        //     assert(start != 34, "STOP")
+        // }
+        
+        str.write_string(build, right[start-leftl:end-leftl])
     } else {
         str.write_string(build, left[start:])
-        str.write_string(build, right[:end])
+        // if start > 26 {
+        //     log.errorf("PRE CRASH: '{}' END: {}", right, end)
+        //     log.errorf("OTHER: '{}' START: {}", left, start)
+        // }
+        if end < len(right) {
+            str.write_string(build, right[:end-leftl])
+        }
+        // assert(start <= 26, "BOTH")
     }
+    // assert(start <= 26, "END")
+
 }
 
 
@@ -127,6 +248,7 @@ gbuff_make :: proc(
     b := GapBuffer {}
     b.allocator = allocator
     b.buf = make([]u8, capacity, allocator)
+    b.end = capacity
     return b
 }
 

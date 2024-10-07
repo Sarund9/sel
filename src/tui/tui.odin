@@ -12,16 +12,19 @@ Context :: struct {
     width, height: i32,
     
     quit: bool,
-    input: struct {
-        char: rune,
-        key: Key,
-    },
+    cursorpos: [2]i32,
+    stack: [dynamic]Con,
+}
+
+Con :: struct {
+    x, y, w, h: i32,
 }
 
 Event :: union {
     Char,
     Key,
     Mouse,
+    Resized,
 }
 
 Char :: rune
@@ -32,13 +35,17 @@ Key  :: struct {
 }
 
 Mouse :: struct {
-    button: enum {
-        Left, Right, Middle,
-        Released, Down, Up,
-    },
+    button: Button,
     motion: bool,
     pos: [2]i32,
 }
+
+Button :: enum {
+    Left, Right, Middle,
+    Released, Down, Up,
+}
+
+Resized :: distinct [2]i32
 
 
 init :: proc(ctx: ^Context) {
@@ -48,9 +55,12 @@ init :: proc(ctx: ^Context) {
 
     ctx.width  = tb.width()
     ctx.height = tb.height()
+
+    ctx.stack = make([dynamic]Con)
 }
 
 shutdown :: proc(ctx: ^Context) {
+    delete(ctx.stack)
     tb.shutdown()
 }
 
@@ -64,9 +74,14 @@ frame :: proc(ctx: ^Context) -> Event {
 
     e: tb.Event
     tb.poll_event(&e)
-    if e.type == .KEY && e.key == .CTRK_L {
-        ctx.quit = true
+    #partial switch e.type {
+    case .KEY:
+        ctx.quit = e.key == .CTRK_L
+    case .MOUSE:
+        ctx.cursorpos = e.mouse
     }
+
+    clear(&ctx.stack)
 
     // status: cstring
     // defer {
@@ -80,7 +95,7 @@ frame :: proc(ctx: ^Context) -> Event {
     case .RESIZE:
         ctx.width  = e.resize.w
         ctx.height = e.resize.h
-        return nil
+        return Resized { ctx.width, ctx.height }
     case .MOUSE:
         // status = fmt.ctprintf("Mouse Event")
         res: Mouse
@@ -122,6 +137,37 @@ frame :: proc(ctx: ^Context) -> Event {
 
 frame_end :: proc(ctx: ^Context) {
     tb.present()
+}
+
+begin :: proc(ctx: ^Context, x, y, w, h: i32) -> ^Con {
+    append(&ctx.stack, Con {
+        x, y, h, w,
+    })
+    return &ctx.stack[len(ctx.stack) - 1]
+}
+
+end :: proc(ctx: ^Context, loc := #caller_location) {
+    assert(len(ctx.stack) > 0, "Extra TUI Container poped!", loc)
+    pop(&ctx.stack)
+}
+
+draw :: proc(ctx: ^Context, x, y: i32, text: cstring) {
+    bounds: Con
+    if len(ctx.stack) == 0 {
+        bounds.w = ctx.width
+        bounds.h = ctx.height
+    } else {
+        bounds = ctx.stack[len(ctx.stack) - 1]
+    }
+
+    if y >= bounds.y {
+        return
+    }
+
+    fx := bounds.x + x
+    fy := bounds.y + y
+
+    tb.print(fx, fy, {}, {}, text)
 }
 
 line :: proc(ctx: ^Context, text: cstring) {

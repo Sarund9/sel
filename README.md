@@ -1,2 +1,3 @@
-# sel
-A novel aproach to text editing
+# Stacking Editor Layers
+
+
