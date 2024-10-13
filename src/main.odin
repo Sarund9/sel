@@ -10,13 +10,11 @@ import "core:encoding/ansi"
 import str "core:strings"
 import "core:testing"
 
-import "editor"
-
 import tb "tui/termbox2"
 import "tui"
 
 
-@test
+// @test
 maintest :: proc(t: ^testing.T) {
     testing.cleanup(t, proc(data: rawptr) {
         tui.shutdown(&ctx)
@@ -137,15 +135,61 @@ end
             write_string(&status, ", MODS: ")
             write_string(&status, fmt.tprint(e.mods))
             
+            left, right := calculate_layout(&ctx)
+
             #partial switch e.key {
             // case .ARROW_DOWN:
             //     cursor.y += 1
             // case .ARROW_UP:
             //     cursor.y -= 1
-            // case .ARROW_LEFT:
-            //     cursor.x -= 1
-            // case .ARROW_RIGHT:
-            //     cursor.x += 1
+            case .ARROW_LEFT:
+                moved := edit_cursor_move(&edit, -1)
+                if moved == 0 do break
+
+                cursor.x += auto_cast moved
+
+                switch rune_at_cursor(&edit) {
+                case '\r', '\n':
+                    edit.cursor -= 2 // Skip newline
+
+                    // TODO: UTF-8 Support
+                    // Go backwards to where the line starts, count characters
+                    i := 0
+                    scan: for {
+                        i -= 1
+                        ch := rune_at_index(&edit, edit.cursor - i)
+                        switch ch {
+                            case '\r', '\n': break scan
+                        }
+                    }
+                    cursor.x = i32(-i)
+                    cursor.y -= 1
+
+                    builder_reset(&status)
+                    write_string(&status, fmt.tprintf("MOVED"))
+                }
+    
+                abs_x := cursor.x + (left + 1)
+                abs_y := cursor.y
+                tb.set_cursor(abs_x, abs_y)
+            case .ARROW_RIGHT:
+                moved := edit_cursor_move(&edit, 1)
+                if moved == 0 do break
+
+                cursor.x += auto_cast moved
+                
+                switch rune_at_cursor(&edit) {
+                case '\r', '\n':
+                    // builder_reset(&status)
+                    // write_string(&status, fmt.tprintf("MOVED"))
+                    edit.cursor += 2
+                    cursor.x = 0
+                    cursor.y += 1
+                }
+    
+                abs_x := cursor.x + (left + 1)
+                abs_y := cursor.y
+                tb.set_cursor(abs_x, abs_y)
             }
             
         case tui.Char:
@@ -155,13 +199,13 @@ end
             // write_string(&status, "CHAR: ")
             // write_quoted_rune(&status, e)
 
-            line := edit.lines[cursor.y]
-            char := line.offset + int(cursor.x)
+            // line := edit.lines[cursor.y]
+            // char := line.offset + int(cursor.x)
 
-            edit_insert_rune(&edit, char, e)
+            edit_insert_rune(&edit, edit.cursor, e)
             _debug = true
 
-            dumbbuffer()
+            // dumbbuffer()
         case tui.Mouse:
             // using str
             // builder_reset(&status)
@@ -230,95 +274,95 @@ gui :: proc(ctx: ^tui.Context) {
     right := layout.right
     text_width := right - left
 
-    switch pos in pressed(.Left) {
-    case [2]i32:
-        // CURSOR: Mouse to Text Frame
-        newCursor := [2]i32 { pos.x - (left + 1), pos.y }
+    // switch pos in pressed(.Left) {
+    // case [2]i32:
+    //     // CURSOR: Mouse to Text Frame
+    //     newCursor := [2]i32 { pos.x - (left + 1), pos.y }
 
-        if newCursor.x < 0 || newCursor.y >= ctx.height - 1 {
-            break
-        }
-        if len(edit.lines) > 0 {
-            newCursor.y = clamp(newCursor.y, 0, i32(len(edit.lines) - 1))
+    //     if newCursor.x < 0 || newCursor.y >= ctx.height - 1 {
+    //         break
+    //     }
+    //     if len(edit.lines) > 0 {
+    //         newCursor.y = clamp(newCursor.y, 0, i32(len(edit.lines) - 1))
 
-            // thisline := line_length(&edit, auto_cast newCursor.y)
-            thisline := edit.lines[newCursor.y]
-            newCursor.x = min(newCursor.x, i32(thisline.size))
-            newCursor.x = max(newCursor.x, 0)
+    //         // thisline := line_length(&edit, auto_cast newCursor.y)
+    //         thisline := edit.lines[newCursor.y]
+    //         newCursor.x = min(newCursor.x, i32(thisline.size))
+    //         newCursor.x = max(newCursor.x, 0)
             
-            // thislinestart := edit.lines[newCursor.y]
+    //         // thislinestart := edit.lines[newCursor.y]
 
-            // edit_setcursor(&edit, auto_cast newCursor.y, auto_cast newCursor.x)
-            // New-line character correction
-            // Get characters at this line
-            // TODO: Protect newlines ?
-            // TODO: Unit Tests
-            r: rune
-            // if thisline.size < 1 {
-            //     r = '\x00'
-            // } else {
-            // }
-            r = rune_at_index(&edit, thisline.offset + int(newCursor.x))
+    //         // edit_setcursor(&edit, auto_cast newCursor.y, auto_cast newCursor.x)
+    //         // New-line character correction
+    //         // Get characters at this line
+    //         // TODO: Protect newlines ?
+    //         // TODO: Unit Tests
+    //         r: rune
+    //         // if thisline.size < 1 {
+    //         //     r = '\x00'
+    //         // } else {
+    //         // }
+    //         r = rune_at_index(&edit, thisline.offset + int(newCursor.x))
             
-            str.builder_reset(&status)
-            str.write_string(&status, "CHAR: ")
-            str.write_quoted_rune(&status, r)
-            // str.write_string(&status, " - LINE LENGTH: ")
-            // str.write_int(&status, thisline)
-            // switch r {
-            // case '\n', '\r':
-            //     edit_cursor_move(&edit, -1)
-            //     newCursor.x -= 1
-            //     newCursor.x = max(newCursor.x, 0)
-            //     // Skip a second one
-            //     r2 := rune_at_index(&edit, thislinestart + int(newCursor.x - 2))
-            //     switch r2 {
-            //     case '\n', '\r':
-            //         // edit_cursor_move(&edit, -1)
-            //         newCursor.x -= 1
-            //         newCursor.x = max(newCursor.x, 0)
-            //     case:
-            //     }
-            // case:
-            // }
+    //         str.builder_reset(&status)
+    //         str.write_string(&status, "CHAR: ")
+    //         str.write_quoted_rune(&status, r)
+    //         // str.write_string(&status, " - LINE LENGTH: ")
+    //         // str.write_int(&status, thisline)
+    //         // switch r {
+    //         // case '\n', '\r':
+    //         //     edit_cursor_move(&edit, -1)
+    //         //     newCursor.x -= 1
+    //         //     newCursor.x = max(newCursor.x, 0)
+    //         //     // Skip a second one
+    //         //     r2 := rune_at_index(&edit, thislinestart + int(newCursor.x - 2))
+    //         //     switch r2 {
+    //         //     case '\n', '\r':
+    //         //         // edit_cursor_move(&edit, -1)
+    //         //         newCursor.x -= 1
+    //         //         newCursor.x = max(newCursor.x, 0)
+    //         //     case:
+    //         //     }
+    //         // case:
+    //         // }
 
-            // r = rune_at(&edit)
-            // switch r {
-            // case '\n', '\r':
-            //     edit_cursor_move(&edit, -1)
-            //     newCursor.x -= 1
-            // }
-        } else {
-            newCursor = { 0, 0 }
-            // Can't use this because the illegal state will make it fail.
-            // edit_setcursor(&edit, 0, 0)
-            edit.cursor = 0
-        }
+    //         // r = rune_at(&edit)
+    //         // switch r {
+    //         // case '\n', '\r':
+    //         //     edit_cursor_move(&edit, -1)
+    //         //     newCursor.x -= 1
+    //         // }
+    //     } else {
+    //         newCursor = { 0, 0 }
+    //         // Can't use this because the illegal state will make it fail.
+    //         // edit_setcursor(&edit, 0, 0)
+    //         edit.cursor = 0
+    //     }
 
-        cursor = newCursor
+    //     cursor = newCursor
 
 
 
-        {
-            using str
-            // builder_reset(&status)
+    //     {
+    //         using str
+    //         // builder_reset(&status)
             
-            // write_string(&status, "Cursor: ")
-            // write_string(&status, fmt.tprint(cursor))
+    //         // write_string(&status, "Cursor: ")
+    //         // write_string(&status, fmt.tprint(cursor))
             
-            // write_string(&status, "Lines: ")
-            // thisline := line_length(&edit, auto_cast len(edit.lines) - 1)
-            // write_string(&status, fmt.tprint(thisline))
-        }
+    //         // write_string(&status, "Lines: ")
+    //         // thisline := line_length(&edit, auto_cast len(edit.lines) - 1)
+    //         // write_string(&status, fmt.tprint(thisline))
+    //     }
 
-        // TODO: Only set if within bounds
+    //     // TODO: Only set if within bounds
 
-        // CURSOR: Text Frame to Mouse
-        abs_x := newCursor.x + (left + 1)
-        abs_y := newCursor.y
-        tb.set_cursor(abs_x, abs_y)
+    //     // CURSOR: Text Frame to Mouse
+    //     abs_x := newCursor.x + (left + 1)
+    //     abs_y := newCursor.y
+    //     tb.set_cursor(abs_x, abs_y)
 
-    }
+    // }
     // if len(edit.lines) > 0 {
     //     cursor.y = clamp(cursor.y, 0, i32(len(edit.lines) - 1))
     //     thisline := line_length(&edit, edit.lines[cursor.y])

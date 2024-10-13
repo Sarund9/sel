@@ -1,29 +1,17 @@
 {
     "version": "2.0.0",
     "tasks": [
-        // {
-        //     "label": "buildSEL",
-        //     "type": "shell",
-        //     "command": "odin",
-        //     "args": [
-        //         "build", "src/",
-        //         "-out:sel.exe",
-        //     ],
-        // },
         {
-            "label": "alacritty",
+            "label": "tests",
             "type": "shell",
-            "command": "alacritty",
+            "command": "odin",
             "args": [
-                "--config-file", "./testbed/alacritty.toml",
-                "--working-directory", "${cwd}",
-                // "--command", "odin",
-                // "test", "src/",
-                // "-out:sel",
-                "|", "Out-Null",
+                "test", "src/tests.odin", "-file",
+                "-out:sel_tests.exe",
+                "-define:ODIN_TEST_SHORT_LOGS=true",
             ],
             "group": {
-                "kind": "build",
+                "kind": "test",
                 "isDefault": true
             }
         }

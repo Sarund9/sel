@@ -4,6 +4,8 @@
 
  # Binary
 sel
+sel.*
+sel_tests.*
 
  # User Notes
 usernotes

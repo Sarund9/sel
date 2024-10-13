@@ -21,6 +21,11 @@ Editor :: struct {
     lines: [dynamic]Line_Range, // where does each line start
 }
 
+Pos :: struct {
+    pos: u64,
+    lin, col: u32,
+}
+
 Line_Range :: struct {
     offset, size: int,
 }
@@ -140,14 +145,24 @@ edit_remove :: proc(e: ^Editor, cursor, count: int) {
 //     }
 // }
 
-edit_cursor_move :: proc(e: ^Editor, delta: int, loc := #caller_location) {
+
+edit_cursor_move :: proc(
+    e: ^Editor,
+    delta: int,
+    loc := #caller_location,
+) -> (moved: int) {
     size := gbuff_len(e.gap)
-    newPos := e.cursor + size
+    newPos := e.cursor + delta
     newPos = clamp(newPos, 0, size - 1)
+
+    // cursor2D.x += i32(newPos - e.cursor) // TODO: New-Line processing
+    // cursor2D.x = i32(newPos)
+    // str.builder_reset(&status)
+    // str.write_string(&status, fmt.tprintf("CURSOR MOVED FROM {} to {} by {}", e.cursor, newPos, i32(newPos - e.cursor)))
 
     if delta < 0 {
         // Moved backwards inside the gap
-        if newPos < e.gap.end {
+        if e.cursor >= e.gap.start && newPos < e.gap.end {
             // If the gap is at the beginning
             if e.gap.start == 0 {
                 newPos = 0
@@ -157,17 +172,25 @@ edit_cursor_move :: proc(e: ^Editor, delta: int, loc := #caller_location) {
         }
     } else {
         // Moved forwards inside the gap
-        // TODO: Finish
-        panic("Not Implemented", loc)
-        // if newPos >= e.gap.start {
-        //     if e.gap.end == 0 {
-        //         newPos = e.gap.start
-        //     } else {
-        //         newPos += (e.gap.start - newPos)
-        //     }
-        // }
+        if e.cursor < e.gap.start && newPos >= e.gap.start {
+            // If the gap is at the end
+            if e.gap.end == len(e.gap.buf) {
+                newPos = size
+            } else {
+                newPos = e.gap.end + (delta - (e.cursor - e.gap.start))
+            }
+        }
     }
+    // // TODO: New Lines
+    // other: rune
+    // switch rune_at_cursor(e) {
+    // case '\n': other = '\r'
+    // case '\r': other = '\n'
+    // }
+
+    moved = newPos - e.cursor
     e.cursor = newPos
+    return
 }
 
 // TODO: UTF8 SUPPORT
