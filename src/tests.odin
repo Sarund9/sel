@@ -16,7 +16,7 @@ TEST_TEXT :: `# Stacking Editor Layers
 
 `
 
-@test
+// @test
 chain_tests :: proc(t: ^test.T) {
 
     read: str.Reader

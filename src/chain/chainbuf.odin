@@ -14,7 +14,7 @@ import "core:unicode/utf8"
 
 
 Line :: struct {
-    size: u32,
+    offset: u32,
     gap: struct {
         start, end: u16, // start..<end
     },
@@ -25,8 +25,9 @@ Block :: struct {
     buf: []u8,
     lines: [dynamic]Line,
     gap: struct {
-        start, end: u32, // start..<end
+        start, end: u32, // start..<end, in bytes
     },
+    realsize: u32, // total size of actual data in bytes
 }
 
 create :: proc(
@@ -50,6 +51,7 @@ create :: proc(
     // Calculate lines and populate buffer
     offset, linestart: u32
     ch, size, err := io.read_rune(input)
+    unmarked_line: bool // indicates if there are line contents that need to be marked
     mainloop: for _ in 0..<capacity {
         #partial switch err {
         case .None: break
@@ -95,16 +97,21 @@ create :: proc(
             // offset += auto_cast size
             // offset += 1 // Add the extra character
 
+            // TODO: Second gap.start is 65K
+
             linesize := offset - linestart
+            block.realsize += linesize
             // Add the new-line
             append(&block.lines, Line {
-                size = linesize,
+                // size = linesize,
+                offset = linestart,
                 gap = {
-                    // Last 2 characters (New-Line) become the 
+                    // Last 2 characters (New-Line) become the gap
                     start = auto_cast linesize - 2,
                     end   = auto_cast linesize,
                 },
             })
+            unmarked_line = false
 
             linestart = offset // New-line was added, remember where next line starts
 
@@ -117,6 +124,7 @@ create :: proc(
             // Write character to buffer
             bytes, size := utf8.encode_rune(ch)
             copy_slice(block.buf[offset:offset+u32(size)], bytes[:size])
+            unmarked_line = true
 
             // Advance to next character
             offset += auto_cast size
@@ -125,144 +133,67 @@ create :: proc(
 
     }
 
-    // assert(false)
-
-    return block
-    /*
-    {
-        OLD ATTEMPTS
-        
-        // MINI LEXER
-        Lex :: struct {
-            input: io.Reader,
-            index: i64,
-            ch: rune,
-            size: int,
-            err: io.Error,
-        }
-
-        next :: proc(using lex: ^Lex) -> bool {
-            if err != .None do return false // in case of repeated advance after error
-
-            ch, size, err = io.read_rune(input)
-            index += 1
-            #partial switch err {
-            case .None: return true
-            case .EOF:  return false
-            case:
-                // Unknown read error...
-                log.error("Unknown error while loading buffer")
-                return false
-            }
-        }
-
-        newline :: proc(lex: ^Lex) -> bool {
-            switch lex.ch {
-            case '\n', '\r': return true
-            }
-            return false
-        }
-
-
-        lex := Lex {
-            input = input,
-            index = -1,
-        }
-
-        // Add line
-        append(&block.lines, Line {})
-        if next(&lex) do mainloop: for {
-            // Line contents
-            line := &block.lines[len(block.lines) - 1]
-            if !newline(&lex) {
-                for {
-                    line.gap.start += 1
-                    if !next(&lex) {
-                        // Last line, gap is 0
-                        line.gap.end = line.gap.start
-                        break mainloop
-                    }
-                    if newline(&lex) {
-                        break
-                    }
-                }
-                
-            }
-            
-            // Get the next character, should be a new-line
-            if !next(&lex) || !newline(&lex) {
-                // File was corrupted ?
-                panic("Unimplemented")
-            }
-
-            // Set the line ending
-            line.gap.end = line.gap.start + 2
-        }
-        
-
-        // line: Line
-        // i := -1
-        // loop: for i < capacity {
-        //     i += 1
-        //     ch, size, err := io.read_rune(input)
-        //     #partial switch err {
-        //     case .None: break
-        //     case .EOF:
-        //         // Last line
-        //         log.info("LAST CHAR:", i)
-        //         line.gap.start = u16(u32(i) - line.offset)
-        //         line.gap.end = line.gap.start
-        //         append(&block.lines, line)
-        //         break loop
-        //     case:
-        //         // Unknown read error...
-        //         log.error("Unknown error while loading buffer")
-        //         break loop
-        //     }
-
-        //     other: rune
-        //     switch ch {
-        //     case '\n': other = '\r'
-        //     case '\r': other = '\n'
-        //     }
-        //     if other != 0 {
-        //         line.gap.start = u16(u32(i) - line.offset)   // TODO: Check
-        //         line.gap.end = u16(u32(i) - line.offset) + 2 // TODO: Check
-
-        //         // Add the line as [\n]..<[\r]+1
-        //         log.info("At", i, "add:", line)
-        //         append(&block.lines, line)
-        //         line.offset = u32(i) + 2
-                
-        //         // Skip advance the next rune
-        //         ch, size, err := io.read_rune(input)
-        //         i += 1
-        //         #partial switch err {
-        //         case .None: break
-        //         case .EOF: break loop
-        //         case:
-        //             // Unknown read error...
-        //             log.error("Unknown error while loading buffer")
-        //             break loop
-        //         }
-
-        //         switch ch {
-        //         case other:
-        //             line.offset = u32(i) + 2
-        //             continue
-        //         case: // Corrupted file ?
-        //             // TODO: Add line endings ?
-        //         }
-                
-        //         continue
-        //     }
-
-        //     bytes, _ := utf8.encode_rune(ch)
-        //     // Write bytes to buffer
-        //     copy_slice(block.buf[i:i+size], bytes[:])
-        // }
-
-    }
-    */
+    // Adds the last line in the file,
+    linesize := offset - linestart
+    block.realsize += linesize
+    append(&block.lines, Line {
+        // size = linesize,
+        offset = linestart,
+        gap = {
+            // Last 2 characters (New-Line) become the 
+            start = auto_cast linesize - 2,
+            end   = auto_cast linesize,
+        },
+    })
+    linestart = offset
     
+    return block
+}
+
+destroy :: proc(using block: Block) {
+    delete(buf, allocator)
+    delete(lines)
+}
+
+linecount :: #force_inline proc(using block: Block) -> int {
+    return len(lines)
+}
+
+readline :: proc(
+    using block: ^Block, line_index: int,
+    loc := #caller_location,
+) -> (left, right: string) {
+    log.assert(line_index > -1 && line_index < len(lines), "ChainBuffer: line index out of range", loc)
+
+    line := &lines[line_index]
+
+    log.assert(line.offset < auto_cast len(buf), "Line offset out of range")
+
+    // TODO: fn Line capacity
+    linecapacity: u32
+    if line_index + 1 >= len(lines) {
+        linecapacity = u32(len(buf)) - line.offset
+    } else {
+        nextline := &lines[line_index + 1]
+        linecapacity = nextline.offset - line.offset
+    }
+
+    if line.gap.start == 0 {
+        left = ""
+    } else {
+        log.info("GAPSTART:", line.gap.start)
+        offset := line.offset
+        size := line.offset+u32(line.gap.start)
+        left = string(buf[offset:size])
+    }
+
+    if u32(line.gap.end) == linecapacity {
+        right = ""
+    } else {
+        offset := line.offset + u32(line.gap.end)
+        size := linecapacity - u32(line.gap.end)
+        right = string(buf[offset:size])
+    }
+
+    return
 }

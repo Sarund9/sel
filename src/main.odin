@@ -9,33 +9,41 @@ import "core:mem"
 import "core:encoding/ansi"
 import str "core:strings"
 import "core:testing"
+import "core:time"
 
 import tb "tui/termbox2"
 import "tui"
 
 
-// @test
-maintest :: proc(t: ^testing.T) {
-    testing.cleanup(t, proc(data: rawptr) {
-        tui.shutdown(&ctx)
-    }, nil)
+state: State
 
-    main()
-}
+State :: struct {
+    status: str.Builder,
+    
+    cursor: [2]i32,
+    ctx: tui.Context,
+    
+    edit: Editor,
 
-status: str.Builder
-
-edit: Editor
-cursor: [2]i32
-ctx: tui.Context
-
-state: struct {
     event: tui.Event,
     layout: struct {
         left, right: i32,
     }
 }
-_debug: bool
+
+@test
+maintest :: proc(t: ^testing.T) {
+    testing.cleanup(t, proc(data: rawptr) {
+        
+        tui.shutdown(&state.ctx)
+    }, nil)
+
+    time.sleep(time.Millisecond * 200) // Wait 200ms
+
+    // chainbuf:184 30:65564
+
+    main()
+}
 
 dumbbuffer :: proc() {
 
@@ -57,44 +65,16 @@ dumbbuffer :: proc() {
     */
     
 
-    for b, i in edit.gap.buf {
-        if edit.gap.start == i {
-            io.write_string(W, "|")
-            continue
-        }
-        if edit.gap.end == i {
-            io.write_string(W, "|")
-            continue
-        }
-        r := rune(b)
-        io.write_escaped_rune(W, r, 0)
-        io.write_string(W, " ")
-    }
-
-    // left, right := gbuff_strings(edit.gap)
-    // io.write_string(W, "[[[\n")
-    // io.write_string(W, left)
-    // io.write_string(W, "\n----\n")
-    // io.write_string(W, right)
-    // io.write_string(W, "\n]]]\n")
-
-    // io.write_string(W, "Line Starts:\n")
-    // for line in edit.lines {
-    //     io.write_string(W, " > ")
-    //     io.write_int(W, line)
-    //     io.write_string(W, "\n")
-
-    // }
 }
 
 main :: proc() {
     
     // log.info("HELLO ")
 
-    defer str.builder_destroy(&status)
+    defer str.builder_destroy(&state.status)
 
-    tui.init(&ctx)
-    defer tui.shutdown(&ctx)
+    tui.init(&state.ctx)
+    defer tui.shutdown(&state.ctx)
 
     SAMPLE_TEXT :: `
 
@@ -107,35 +87,23 @@ local function prepare(path)
     file.close(fd)
 end
 // `
-    // TEMP: INIT EDITOR
-    {
-        data, ok := os.read_entire_file("README.md")
-        assert(ok, "File not found")
-        edit.gap = gbuff_make(len(data) + 32)
-        // copy_slice(edit.gap.buf, data)
-        gbuff_insert_slice(&edit.gap, 0, data)
-        delete(data)
-        calculate_lines(&edit)
-    }
-    defer {
-        delete(edit.lines)
-        delete(edit.gap.buf, edit.gap.allocator)
-    }
 
-    state.layout.left, state.layout.right = calculate_layout(&ctx)
+    edit_load(&state.edit, "README.md")
 
-    for !ctx.quit {
-        state.event = tui.frame(&ctx)
+    state.layout.left, state.layout.right = calculate_layout(&state.ctx)
+
+    for !state.ctx.quit {
+        state.event = tui.frame(&state.ctx)
         #partial switch e in state.event {
         case tui.Key:
             using str
-            builder_reset(&status)
-            write_string(&status, "KEY:  ")
-            write_string(&status, fmt.tprint(e.key))
-            write_string(&status, ", MODS: ")
-            write_string(&status, fmt.tprint(e.mods))
+            builder_reset(&state.status)
+            write_string(&state.status, "KEY:  ")
+            write_string(&state.status, fmt.tprint(e.key))
+            write_string(&state.status, ", MODS: ")
+            write_string(&state.status, fmt.tprint(e.mods))
             
-            left, right := calculate_layout(&ctx)
+            left, right := calculate_layout(&state.ctx)
 
             #partial switch e.key {
             // case .ARROW_DOWN:
@@ -143,95 +111,28 @@ end
             // case .ARROW_UP:
             //     cursor.y -= 1
             case .ARROW_LEFT:
-                moved := edit_cursor_move(&edit, -1)
-                if moved == 0 do break
-
-                cursor.x += auto_cast moved
-
-                switch rune_at_cursor(&edit) {
-                case '\r', '\n':
-                    edit.cursor -= 2 // Skip newline
-
-                    // TODO: UTF-8 Support
-                    // Go backwards to where the line starts, count characters
-                    i := 0
-                    scan: for {
-                        i -= 1
-                        ch := rune_at_index(&edit, edit.cursor - i)
-                        switch ch {
-                            case '\r', '\n': break scan
-                        }
-                    }
-                    cursor.x = i32(-i)
-                    cursor.y -= 1
-
-                    builder_reset(&status)
-                    write_string(&status, fmt.tprintf("MOVED"))
-                }
-    
-                abs_x := cursor.x + (left + 1)
-                abs_y := cursor.y
-                tb.set_cursor(abs_x, abs_y)
-            case .ARROW_RIGHT:
-                moved := edit_cursor_move(&edit, 1)
-                if moved == 0 do break
-
-                cursor.x += auto_cast moved
                 
-                switch rune_at_cursor(&edit) {
-                case '\r', '\n':
-                    // builder_reset(&status)
-                    // write_string(&status, fmt.tprintf("MOVED"))
-                    edit.cursor += 2
-                    cursor.x = 0
-                    cursor.y += 1
-                }
-    
-                abs_x := cursor.x + (left + 1)
-                abs_y := cursor.y
-                tb.set_cursor(abs_x, abs_y)
+            case .ARROW_RIGHT:
+                
             }
             
         case tui.Char:
             using str
-            builder_reset(&status)
+            builder_reset(&state.status)
             
-            // write_string(&status, "CHAR: ")
-            // write_quoted_rune(&status, e)
-
-            // line := edit.lines[cursor.y]
-            // char := line.offset + int(cursor.x)
-
-            edit_insert_rune(&edit, edit.cursor, e)
-            _debug = true
-
-            // dumbbuffer()
         case tui.Mouse:
-            // using str
-            // builder_reset(&status)
             
-            // write_string(&status, "MOUSE: ")
-            // write_string(&status, fmt.tprint(e.button))
-            // write_string(&status, " - ")
-            // write_string(&status, fmt.tprint(e.pos.x, e.pos.y))
-            
-            // write_string(&status, "   | ")
-            // write_string(&status, fmt.tprint(e.mods))
-            // if !e.motion && e.button == .Left {
-
-            //     cursor = { left - e.pos.x, e.pos.y }
-            // }
         }
 
         tb.clear()
 
-        gui(&ctx)
+        gui(&state.ctx)
 
         // Status
-        tb.print(5, ctx.height - 1, {
+        tb.print(5, state.ctx.height - 1, {
             reverse = true,
             dim = true,
-        }, {}, str.to_cstring(&status))
+        }, {}, str.to_cstring(&state.status))
 
     }
 }
@@ -274,104 +175,6 @@ gui :: proc(ctx: ^tui.Context) {
     right := layout.right
     text_width := right - left
 
-    // switch pos in pressed(.Left) {
-    // case [2]i32:
-    //     // CURSOR: Mouse to Text Frame
-    //     newCursor := [2]i32 { pos.x - (left + 1), pos.y }
-
-    //     if newCursor.x < 0 || newCursor.y >= ctx.height - 1 {
-    //         break
-    //     }
-    //     if len(edit.lines) > 0 {
-    //         newCursor.y = clamp(newCursor.y, 0, i32(len(edit.lines) - 1))
-
-    //         // thisline := line_length(&edit, auto_cast newCursor.y)
-    //         thisline := edit.lines[newCursor.y]
-    //         newCursor.x = min(newCursor.x, i32(thisline.size))
-    //         newCursor.x = max(newCursor.x, 0)
-            
-    //         // thislinestart := edit.lines[newCursor.y]
-
-    //         // edit_setcursor(&edit, auto_cast newCursor.y, auto_cast newCursor.x)
-    //         // New-line character correction
-    //         // Get characters at this line
-    //         // TODO: Protect newlines ?
-    //         // TODO: Unit Tests
-    //         r: rune
-    //         // if thisline.size < 1 {
-    //         //     r = '\x00'
-    //         // } else {
-    //         // }
-    //         r = rune_at_index(&edit, thisline.offset + int(newCursor.x))
-            
-    //         str.builder_reset(&status)
-    //         str.write_string(&status, "CHAR: ")
-    //         str.write_quoted_rune(&status, r)
-    //         // str.write_string(&status, " - LINE LENGTH: ")
-    //         // str.write_int(&status, thisline)
-    //         // switch r {
-    //         // case '\n', '\r':
-    //         //     edit_cursor_move(&edit, -1)
-    //         //     newCursor.x -= 1
-    //         //     newCursor.x = max(newCursor.x, 0)
-    //         //     // Skip a second one
-    //         //     r2 := rune_at_index(&edit, thislinestart + int(newCursor.x - 2))
-    //         //     switch r2 {
-    //         //     case '\n', '\r':
-    //         //         // edit_cursor_move(&edit, -1)
-    //         //         newCursor.x -= 1
-    //         //         newCursor.x = max(newCursor.x, 0)
-    //         //     case:
-    //         //     }
-    //         // case:
-    //         // }
-
-    //         // r = rune_at(&edit)
-    //         // switch r {
-    //         // case '\n', '\r':
-    //         //     edit_cursor_move(&edit, -1)
-    //         //     newCursor.x -= 1
-    //         // }
-    //     } else {
-    //         newCursor = { 0, 0 }
-    //         // Can't use this because the illegal state will make it fail.
-    //         // edit_setcursor(&edit, 0, 0)
-    //         edit.cursor = 0
-    //     }
-
-    //     cursor = newCursor
-
-
-
-    //     {
-    //         using str
-    //         // builder_reset(&status)
-            
-    //         // write_string(&status, "Cursor: ")
-    //         // write_string(&status, fmt.tprint(cursor))
-            
-    //         // write_string(&status, "Lines: ")
-    //         // thisline := line_length(&edit, auto_cast len(edit.lines) - 1)
-    //         // write_string(&status, fmt.tprint(thisline))
-    //     }
-
-    //     // TODO: Only set if within bounds
-
-    //     // CURSOR: Text Frame to Mouse
-    //     abs_x := newCursor.x + (left + 1)
-    //     abs_y := newCursor.y
-    //     tb.set_cursor(abs_x, abs_y)
-
-    // }
-    // if len(edit.lines) > 0 {
-    //     cursor.y = clamp(cursor.y, 0, i32(len(edit.lines) - 1))
-    //     thisline := line_length(&edit, edit.lines[cursor.y])
-    //     cursor.x = clamp(cursor.x, left + 1, right - 2)
-    // } else {
-    //     cursor = { left + 1, 0 }
-    // }
-    // tb.set_cursor(cursor.x, cursor.y)
-
     // Modes
     for line in 0..<i32(1) {
         x := left - 18
@@ -386,7 +189,7 @@ gui :: proc(ctx: ^tui.Context) {
     // Editor Lines
     for line in 0..<ctx.height-3 {
         if text_width < 1 do break
-        if int(line) >= len(edit.lines) {
+        if int(line) >= edit_linecount(&edit) {
             // str.builder_reset(&status)
             // str.write_string(&status, "FILE TOO SHORT")
             break
@@ -400,17 +203,18 @@ gui :: proc(ctx: ^tui.Context) {
         )
 
         // Text
-        liner := edit.lines[line]
+        // liner := edit.lines[line]
         // line_size := line_length(&edit, int(line)) // New lines
-        if liner.size < 1 {
-            continue
-        }
+        // if liner.size < 1 {
+        //     continue
+        // }
         str.builder_reset(&build)
+        edit_printline(&edit, int(line), &build)
         // if line == 3 {
         //     log.warn("PRE CRASH:", line_start, "adv", line_size)
         // }
 
-        print_range(&edit, &build, liner.offset, liner.offset + liner.size)
+        // print_range(&edit, &build, liner.offset, liner.offset + liner.size)
         // assert(line < 3, "END")
 
         tb.print(

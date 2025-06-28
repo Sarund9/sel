@@ -1,0 +1,15 @@
+[?25l]2;Odin test runner (0/1)\[0m[INFO ] --- [0m[2024-10-13 22:59:26] Starting test runner with 1 thread.
+[0m[INFO ] --- [0m[2024-10-13 22:59:26] The random seed sent to every test is: 17301710687277. Set with -define:ODIN_TEST_RANDOM_SEED=n.
+[0m[INFO ] --- [0m[2024-10-13 22:59:26] Memory tracking is enabled. Tests will log their memory usage if there's an issue.
+[0m[INFO ] --- [0m[2024-10-13 22:59:26] < Final Mem/ Total Mem> <  Peak Mem> (#Free/Alloc) :: [package.test_name]
+/mnt/f/__DEV/sel/src/chain/chainbuf.odin([0m[INFO ] --- [0m[2024-10-13 22:59:26] [chainbuf.odin:182:readline()] GAPSTART: 24
+[0m[INFO ] --- [0m[2024-10-13 22:59:26] [chainbuf.odin:182:readline()] GAPSTART: 65534
+185:26) Invalid slice indices 30:65564 is out of range 0..<1024
+]2;Odin test runner (1/1)\[31m[FATAL] --- [0m[2024-10-13 22:59:26] Caught signal to stop test #0 main.maintest for: Illegal_Instruction.
+[33m[WARN ] --- [0m[2024-10-13 22:59:26] <   1.06KiB/   2.06KiB> <   2.06KiB> (    1/    3) :: main.maintest
+        +++ leak        64B @ 0x7FC00C2C7858 [chainbuf.odin:103:create()]
+        +++ leak    1.00KiB @ 0x7FC00C2C7450 [chainbuf.odin:46:create()]
+[?25h
+Finished 1 test in 208.503425ms. The test [31mfailed.[0m
+ - main.maintest 	Signal caught: Illegal_Instruction
+

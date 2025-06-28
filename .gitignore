@@ -13,3 +13,4 @@ usernotes
  # Submodule
 src/tui/termbox2/termbox2/
 
+src.bin
